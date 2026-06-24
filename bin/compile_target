@@ -1,0 +1,19 @@
+#!/bin/bash
+# =============================================================================
+# crs-sample-hybrid build phase
+# =============================================================================
+# Compiles the target with the standard oss-fuzz `compile` and submits the
+# harness binaries (/out) and source tree (/src) as build outputs.
+# =============================================================================
+set -e
+
+log() { echo "[compile_target] $*"; }
+
+log "Compiling target project..."
+compile
+
+log "Submitting build outputs..."
+libCRS submit-build-output "$OUT" build
+libCRS submit-build-output "$SRC" src
+
+log "Build completed successfully."

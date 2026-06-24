@@ -1,0 +1,4 @@
+- [ ] Ran the candidate input against the harness via `crs-verify --harness {harness} <input>`
+- [ ] Return code is non-zero (crash confirmed)
+- [ ] Crash is a distinct vulnerability (different root cause / crash stack from candidates already saved)
+- [ ] Wrote the input to the candidate directory (not the POV/submit directory)

@@ -1,0 +1,38 @@
+##############################################################################
+#                        CRS Compose Configuration                           #
+#                   Example for crs-sample-hybrid                             #
+##############################################################################
+
+# --- General Settings -------------------------------------------------------
+run_env: local
+docker_registry: local
+
+# --- Infrastructure ---------------------------------------------------------
+oss_crs_infra:
+  cpuset: "0-1"
+  memory: "8G"
+
+# --- CRS (crs-sample-hybrid) ------------------------------------------------
+crs-sample-hybrid:
+  source:
+    local_path: /path/to/crs-sample-hybrid    # UPDATE: local filesystem path
+  cpuset: "2-7"                                # UPDATE: available CPU cores
+  memory: "16G"                                # UPDATE: available memory
+  llm_budget: 10                               # LLM budget in USD
+  additional_env:
+    CRS_AGENT: claude_code
+    ANTHROPIC_MODEL: claude-opus-4-6
+    CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN}"  # Optional: OAuth instead of LiteLLM proxy
+    # HYBRID_ENABLE_FUZZER: "1"
+    # HYBRID_ENABLE_CLAUDE: "1"
+    # HYBRID_ALLOW_TIMEOUT_BUG: "0"
+    # AGENT_TIMEOUT: "3600"
+
+# --- Optional LLM Configuration --------------------------------------------
+# Uncomment to inject an external LiteLLM endpoint for Claude.
+# llm_config:
+#   litellm:
+#     mode: external
+#     external:
+#       url_env: EXTERNAL_LITELLM_API_BASE
+#       key_env: EXTERNAL_LITELLM_API_KEY
