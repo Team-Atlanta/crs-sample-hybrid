@@ -15,6 +15,7 @@ bugs via libCRS.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import signal
@@ -22,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 from libCRS.base import DataType
@@ -81,6 +83,52 @@ def _prepare_source(crs, cfg: Config) -> Path:
             cwd=source_dir, capture_output=True, timeout=180,
         )
     return source_dir
+
+
+def _stage_ossfuzz_seeds(cfg: Config, harnesses: list[str], cap: int = 2000) -> int:
+    """Extract oss-fuzz bundled seed corpora into the shared seed dir.
+
+    For each in-scope harness, unzip ``<harness>_seed_corpus.zip`` (the standard
+    oss-fuzz / ClusterFuzz seed corpus shipped in the build output) into
+    ``cfg.seed_dir``. These seeds are then used by both producers:
+      - the fuzzer's ``_seed_corpus`` bootstraps its libFuzzer corpus from them, and
+      - the agent's ``seeds_present`` prompt section points Claude at them
+        directly, so it learns the real input format from turn one (instead of
+        relying on the seed-share rolling window, which can evict them).
+    Files are content-addressed so identical seeds are not duplicated.
+    """
+    cfg.seed_dir.mkdir(parents=True, exist_ok=True)
+    staged = 0
+    for harness in harnesses:
+        for cand in (
+            cfg.build_dir / f"{harness}_seed_corpus.zip",
+            cfg.build_dir / f"{harness}.zip",
+        ):
+            if not cand.is_file():
+                continue
+            try:
+                with zipfile.ZipFile(cand) as zf:
+                    for name in zf.namelist():
+                        if name.endswith("/") or staged >= cap:
+                            continue
+                        try:
+                            data = zf.read(name)
+                        except (zipfile.BadZipFile, OSError):
+                            continue
+                        if not data:
+                            continue
+                        dst = cfg.seed_dir / f"ossfuzz_{harness}_{hashlib.md5(data).hexdigest()[:16]}"
+                        if not dst.exists():
+                            dst.write_bytes(data)
+                            staged += 1
+                logger.info("Staged oss-fuzz seed corpus: %s", cand.name)
+            except (zipfile.BadZipFile, OSError) as e:
+                logger.warning("Failed to stage oss-fuzz seeds from %s: %s", cand, e)
+    if staged:
+        logger.info("Staged %d oss-fuzz seed file(s) into %s (fuzzer + agent will use them)", staged, cfg.seed_dir)
+    else:
+        logger.info("No oss-fuzz seed corpora found in %s for harnesses %s", cfg.build_dir, harnesses)
+    return staged
 
 
 def _resolve_harnesses(cfg: Config) -> list[str]:
@@ -156,6 +204,12 @@ def main() -> None:
     cfg.agent_seed_dir.mkdir(parents=True, exist_ok=True)
     for harness in harnesses:
         cfg.fuzzer_seed_view_dir(harness).mkdir(parents=True, exist_ok=True)
+
+    # Stage oss-fuzz bundled seed corpora into the shared seed dir, so BOTH the
+    # fuzzer (corpus bootstrap) and the agent (its seeds_present prompt) start
+    # from real oss-fuzz seeds — the agent gets them directly, not subject to the
+    # seed-share rolling window.
+    _stage_ossfuzz_seeds(cfg, harnesses)
 
     submit_thread = threading.Thread(
         target=crs.register_submit_dir, args=(DataType.POV, cfg.pov_dir), daemon=True
