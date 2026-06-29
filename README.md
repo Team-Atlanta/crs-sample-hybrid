@@ -8,15 +8,17 @@ orchestrator, and submits only **deduplicated** crashes using stack-based dedupl
 
 ```
                     ┌──────────────────────── orchestrator ────────────────────────┐
-                    │                                                               │
-  harness binaries  │   ┌───────────┐  crash artifacts ─┐                          │
-  (from build) ─────┼─▶ │  fuzzer   │ ──────────────────┤                          │
-                    │   │ (libFuzzer│                    ▼                          │
+                    │                  seeds ⇄ (seed sharing)                       │
+                    │            ┌───────────────────────────────┐                  │
+                    │            ▼                               │                  │
+  harness binaries  │   ┌───────────┐  crash artifacts ─┐        │                  │
+  (from build) ─────┼─▶ │  fuzzer   │ ──────────────────┤        │ seeds            │
+                    │   │ (libFuzzer│                    ▼        │                  │
                     │   │ / Jazzer) │           ┌─────────────────┐   unique POVs   │
                     │   └───────────┘           │ verify → dedup  │ ─────────────▶  │ libCRS
                     │   ┌───────────┐ candidates│  → submit loop  │   (submit dir)  │ auto-submit
   source + diff ────┼─▶ │  Claude   │ ──────────▶                 │                 │
-                    │   │  Code     │           └─────────────────┘                 │
+                    │   │  Code     │ ◀── seeds  └─────────────────┘                 │
                     │   └───────────┘                                               │
                     └───────────────────────────────────────────────────────────────┘
 ```
@@ -34,9 +36,27 @@ so it has the full target runtime and can execute the compiled harnesses directl
    the fuzzer *or* Claude — is run against the harness to confirm a crash, reduced to a
    stack-based crash **signature**, and deduplicated. Only the first input for each unique
    signature is copied into the libCRS POV submit directory (auto-submitted by the libCRS daemon).
+4. **Shares seeds both ways** (`crshybrid/seedshare.py`) between the fuzzer and Claude (below).
 
 Whether a crashing input comes from the fuzzer or from Claude, it goes through the **same**
 verify → dedup → submit path, so the orchestrator never submits two inputs for the same bug.
+
+## Seed sharing (fuzzer ⇄ agent)
+
+The fuzzer and Claude run on the same harness at the same time and exchange inputs, so each
+amplifies the other (`crshybrid/seedshare.py`, hash-deduplicated, atomic writes):
+
+- **agent → fuzzer** — every input Claude produces (its crash candidates and the coverage
+  seeds it writes to `agent-seeds/`) is copied into the harness's libFuzzer corpus. libFuzzer
+  fork mode re-reads the corpus between jobs, so it starts mutating around Claude's inputs —
+  letting Claude reason past a hard gate (magic/length/checksum, deep parser state) and the
+  fuzzer explode outward from there.
+- **fuzzer → agent** — a capped, deduplicated sample of the fuzzer's evolving corpus is
+  surfaced into `seedshare/from-fuzzer/<harness>/`, which Claude re-reads during its run to
+  learn the real input format and see which structures already reach deep code.
+
+The fuzzer, the agent, and bidirectional seed sharing are **always on** — this is a hybrid
+CRS, so none of the three is a toggle.
 
 ## Stack-based deduplication
 
@@ -63,6 +83,7 @@ regardless of ASLR. Crashes are keyed by `(harness, signature)`.
 | `crshybrid/harness.py` | Run a single input against a harness binary |
 | `crshybrid/fuzzer.py` | Continuous libFuzzer/Jazzer fuzzing manager |
 | `crshybrid/submitter.py` | Verify → dedup → submit loop |
+| `crshybrid/seedshare.py` | Bidirectional seed sharing (agent ⇄ fuzzer) |
 | `crshybrid/cli.py` | `crs-verify` helper (shared verification path) |
 | `agents/claude_code.py` + `agents/claude_code.md` | Claude Code producer agent |
 | `bin/compile_target` | Build phase: `compile` + submit `build`/`src` |
@@ -75,8 +96,8 @@ Set via `additional_env` in `crs.yaml` or the compose file:
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `ANTHROPIC_MODEL` | `claude-opus-4-6` | Claude model |
-| `HYBRID_ENABLE_FUZZER` | `1` | Run the fuzzer |
-| `HYBRID_ENABLE_CLAUDE` | `1` | Run the Claude agent |
+| `HYBRID_SEED_SHARE_INTERVAL` | `10` | Seed-share sync cadence (s) |
+| `HYBRID_SEED_SHARE_MAX_TO_AGENT` | `300` | Cap on fuzzer seeds surfaced to the agent |
 | `HYBRID_ALLOW_TIMEOUT_BUG` | `0` | Treat hangs (wall-clock timeouts) as bugs |
 | `HYBRID_FUZZER_RSS_MB` | `2560` | libFuzzer RSS limit |
 | `HYBRID_FUZZER_TIMEOUT` | `25` | libFuzzer per-exec timeout (s) |

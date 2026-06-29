@@ -26,6 +26,8 @@ def run(
     language: str = "c",
     sanitizer: str = "address",
     stop_event=None,
+    fuzzer_seed_dir: Path | None = None,
+    agent_seed_dir: Path | None = None,
 ) -> bool:
     """Run the agent autonomously.
 
@@ -36,6 +38,10 @@ def run(
     4. Verify each input (e.g. via ``crs-verify --harness <harness> <input>``)
     5. Write verified candidate inputs to ``candidate_dir`` (the orchestrator
        deduplicates and submits)
+
+    Seed sharing (optional, when the orchestrator passes the dirs):
+    - ``fuzzer_seed_dir``: read the fuzzer's live corpus sample for format hints.
+    - ``agent_seed_dir``: write coverage-expanding seeds for the fuzzer to mutate.
 
     Should return True if it produced any candidates, and stop promptly when
     ``stop_event`` is set.

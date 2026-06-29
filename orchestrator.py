@@ -30,6 +30,7 @@ from libCRS.cli.main import init_crs_utils
 from crshybrid import harness as harness_mod
 from crshybrid.config import Config
 from crshybrid.fuzzer import FuzzerManager
+from crshybrid.seedshare import SeedSharer
 from crshybrid.submitter import Submitter
 
 logging.basicConfig(
@@ -143,12 +144,18 @@ def main() -> None:
     if not harnesses:
         logger.error("No harnesses found in %s — nothing to run", cfg.build_dir)
         sys.exit(1)
+    # Harness the agent targets (also the one its seeds are shared into).
+    primary = cfg.harness if cfg.harness in harnesses else harnesses[0]
 
     # --- Prepare working dirs and submission watcher ---------------------- #
     cfg.pov_dir.mkdir(parents=True, exist_ok=True)
     cfg.candidate_dir.mkdir(parents=True, exist_ok=True)
     for source in ("claude",):
         cfg.candidate_dir_for(source).mkdir(parents=True, exist_ok=True)
+    # Seed-sharing dirs (pre-create so the agent can list them from the start).
+    cfg.agent_seed_dir.mkdir(parents=True, exist_ok=True)
+    for harness in harnesses:
+        cfg.fuzzer_seed_view_dir(harness).mkdir(parents=True, exist_ok=True)
 
     submit_thread = threading.Thread(
         target=crs.register_submit_dir, args=(DataType.POV, cfg.pov_dir), daemon=True
@@ -177,34 +184,37 @@ def main() -> None:
     submitter_thread = threading.Thread(target=submitter.run, name="submitter", daemon=True)
     submitter_thread.start()
 
-    # --- Start the fuzzer ------------------------------------------------- #
-    fuzzer: FuzzerManager | None = None
-    if cfg.enable_fuzzer:
-        fuzzer = FuzzerManager(cfg, harnesses)
-        fuzzer.start()
-    else:
-        logger.info("Fuzzer disabled (HYBRID_ENABLE_FUZZER=0)")
+    # --- Start the fuzzer (always — this is a hybrid CRS) ----------------- #
+    fuzzer = FuzzerManager(cfg, harnesses)
+    fuzzer.start()
 
-    # --- Start Claude ----------------------------------------------------- #
+    # --- Start Claude (always — this is a hybrid CRS) --------------------- #
+    # The agent is mandatory; it can only be skipped if it has no credentials,
+    # which is a misconfiguration. In that case keep the fuzzer running rather
+    # than waste the whole run, but flag it loudly.
     claude_thread: threading.Thread | None = None
     has_creds = bool(cfg.llm_api_url and cfg.llm_api_key) or bool(
         os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
     )
-    if not cfg.enable_claude:
-        logger.info("Claude disabled (HYBRID_ENABLE_CLAUDE=0)")
-    elif not has_creds:
-        logger.warning("Claude enabled but no LLM credentials provided — skipping Claude agent")
-    else:
-        primary = cfg.harness if cfg.harness in harnesses else harnesses[0]
+    if has_creds:
         claude_thread = threading.Thread(
             target=_run_claude, args=(cfg, source_dir, primary, stop),
             name="claude", daemon=True,
         )
         claude_thread.start()
+    else:
+        logger.error(
+            "No LLM credentials (set CLAUDE_CODE_OAUTH_TOKEN or an llm_config) — "
+            "the agent cannot run; continuing fuzzer-only (degraded)"
+        )
 
-    if fuzzer is None and claude_thread is None:
-        logger.error("Neither fuzzer nor Claude is active — exiting")
-        stop.set()
+    # --- Start seed sharing (agent ⇄ fuzzer, always on) ------------------- #
+    # The whole point of the hybrid. It only has work when the agent is also
+    # live, so it starts whenever Claude does.
+    seedshare_thread: threading.Thread | None = None
+    if claude_thread is not None:
+        sharer = SeedSharer(cfg, harnesses, stop, agent_harness=primary)
+        seedshare_thread = sharer.start_thread()
 
     # --- Run until killed ------------------------------------------------- #
     try:
@@ -212,8 +222,9 @@ def main() -> None:
             stop.wait(5)
     finally:
         logger.info("Shutting down orchestrator...")
-        if fuzzer is not None:
-            fuzzer.stop()
+        fuzzer.stop()
+        if seedshare_thread is not None:
+            seedshare_thread.join(timeout=30)
         # Allow the submitter's final drain to outlast one worst-case verify
         # (verify_timeout + kill grace) so in-flight unique POVs are not abandoned.
         submitter_thread.join(timeout=cfg.verify_timeout + 30)
@@ -237,6 +248,10 @@ def _run_claude(cfg: Config, source_dir: Path, harness: str, stop: threading.Eve
             logger.warning("Falling back to agents.claude_code")
         except ImportError:
             return
+    # Seed sharing is always on in the hybrid, so the agent always gets the
+    # shared dirs: it reads the fuzzer's corpus sample and writes coverage seeds.
+    fuzzer_seed_dir = cfg.fuzzer_seed_view_dir(harness)
+    agent_seed_dir = cfg.agent_seed_dir
     try:
         agent.setup(source_dir, {"llm_api_url": cfg.llm_api_url, "llm_api_key": cfg.llm_api_key})
         produced = agent.run(
@@ -251,6 +266,8 @@ def _run_claude(cfg: Config, source_dir: Path, harness: str, stop: threading.Eve
             language=cfg.language,
             sanitizer=cfg.sanitizer,
             stop_event=stop,
+            fuzzer_seed_dir=fuzzer_seed_dir,
+            agent_seed_dir=agent_seed_dir,
         )
         logger.info("Claude agent finished (produced candidates: %s)", produced)
     except Exception:

@@ -43,6 +43,7 @@ def _load_prompt_templates() -> dict[str, str]:
         "diff_present": _load_section("diff_present.md"),
         "diff_absent": _load_section("diff_absent.md"),
         "seeds_present": _load_section("seeds_present.md"),
+        "seed_sharing": _load_section("seed_sharing.md"),
         "pre_submit": _load_section("pre_submit.md"),
     }
 
@@ -161,6 +162,8 @@ def run(
     language: str = "c",
     sanitizer: str = "address",
     stop_event=None,
+    fuzzer_seed_dir: Path | None = None,
+    agent_seed_dir: Path | None = None,
 ) -> bool:
     """Launch Claude Code; verified candidate inputs are written to candidate_dir."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -198,6 +201,17 @@ def run(
     else:
         bug_candidate_section = ""
 
+    # Seed-sharing section (only when the orchestrator wired up the shared dirs).
+    if fuzzer_seed_dir is not None and agent_seed_dir is not None:
+        agent_seed_dir.mkdir(parents=True, exist_ok=True)
+        fuzzer_seed_dir.mkdir(parents=True, exist_ok=True)
+        seed_sharing_section = templates["seed_sharing"].format(
+            fuzzer_seed_dir=_md_inline(str(fuzzer_seed_dir)),
+            agent_seed_dir=_md_inline(str(agent_seed_dir)),
+        )
+    else:
+        seed_sharing_section = ""
+
     # These sections embed a {harness} token; Python str.format() does not
     # recurse into substituted values, so they must be formatted up front or the
     # literal "{harness}" leaks into the final CLAUDE.md.
@@ -215,6 +229,7 @@ def run(
         workflow_section=workflow_section,
         diff_section=diff_section,
         seed_section=seed_section,
+        seed_sharing_section=seed_sharing_section,
         bug_candidate_section=bug_candidate_section,
         pre_submit_section=pre_submit_section,
     )
@@ -239,6 +254,15 @@ def run(
         prompt_lines.append(
             "- Bug-candidate report files: " + " ".join(_md_inline(str(p)) for p in bug_candidates)
         )
+    if fuzzer_seed_dir is not None and agent_seed_dir is not None:
+        prompt_lines += [
+            "",
+            "A fuzzer is running on this harness at the same time and shares seeds with you:",
+            f"- Read the fuzzer's live corpus sample in {_md_inline(str(fuzzer_seed_dir))} "
+            "to learn the input format and which structures reach deep code.",
+            f"- Write structurally-valid, coverage-expanding seeds to {_md_inline(str(agent_seed_dir))} "
+            "to hand them to the fuzzer to mutate (these need not crash).",
+        ]
     prompt_lines += [
         "",
         "Read CLAUDE.md for workflow, environment, and submission instructions.",

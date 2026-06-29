@@ -23,8 +23,7 @@ crs-sample-hybrid:
     CRS_AGENT: claude_code
     ANTHROPIC_MODEL: claude-opus-4-6
     CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN}"  # Optional: OAuth instead of LiteLLM proxy
-    # HYBRID_ENABLE_FUZZER: "1"
-    # HYBRID_ENABLE_CLAUDE: "1"
+    # Hybrid CRS: fuzzer, agent, and bidirectional seed sharing are always on.
     # HYBRID_ALLOW_TIMEOUT_BUG: "0"
     # AGENT_TIMEOUT: "3600"
 

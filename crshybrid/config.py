@@ -55,8 +55,8 @@ class Config:
     src_dir: Path = Path("/work/src")
 
     # --- Knobs ------------------------------------------------------------- #
-    enable_fuzzer: bool = field(default_factory=lambda: _bool_env("HYBRID_ENABLE_FUZZER", True))
-    enable_claude: bool = field(default_factory=lambda: _bool_env("HYBRID_ENABLE_CLAUDE", True))
+    # This is a hybrid CRS: the fuzzer, the Claude agent, and bidirectional seed
+    # sharing between them are always on — none of the three is a toggle.
     # Count hangs (wall-clock timeouts we had to kill) as bugs. Off by default,
     # matching uniafl's `allow_timeout_bug = false`.
     allow_timeout_bug: bool = field(default_factory=lambda: _bool_env("HYBRID_ALLOW_TIMEOUT_BUG", False))
@@ -69,6 +69,14 @@ class Config:
     agent_timeout: int = field(default_factory=lambda: max(0, _int_env("AGENT_TIMEOUT", 0)))
     # Poll cadence (seconds) for the verify/dedup loop scanning candidate dirs.
     poll_interval: int = field(default_factory=lambda: _int_env("HYBRID_POLL_INTERVAL", 3))
+    # Seed-sharing cadence (seconds) and cap on fuzzer corpus inputs surfaced to
+    # the agent per harness (the corpus can grow to thousands; the agent samples).
+    seed_share_interval: int = field(
+        default_factory=lambda: _int_env("HYBRID_SEED_SHARE_INTERVAL", 10)
+    )
+    seed_share_max_to_agent: int = field(
+        default_factory=lambda: _int_env("HYBRID_SEED_SHARE_MAX_TO_AGENT", 300)
+    )
 
     # --- Derived directories (populated in __post_init__) ------------------ #
     pov_dir: Path = field(init=False)
@@ -80,6 +88,9 @@ class Config:
     agent_work_dir: Path = field(init=False)
     log_dir: Path = field(init=False)
     dedup_state_dir: Path = field(init=False)
+    seedshare_dir: Path = field(init=False)
+    agent_seed_dir: Path = field(init=False)
+    from_fuzzer_dir: Path = field(init=False)
 
     def __post_init__(self) -> None:
         w = self.work_dir
@@ -94,6 +105,11 @@ class Config:
         self.agent_work_dir = w / "agent"
         self.log_dir = w / "logs"
         self.dedup_state_dir = w / "dedup"
+        # Seed sharing: agent writes coverage seeds here (-> fuzzer corpus); the
+        # fuzzer's corpus sample is surfaced under from_fuzzer_dir/<harness> (-> agent).
+        self.seedshare_dir = w / "seedshare"
+        self.agent_seed_dir = self.seedshare_dir / "agent-seeds"
+        self.from_fuzzer_dir = self.seedshare_dir / "from-fuzzer"
 
     @property
     def is_jvm(self) -> bool:
@@ -108,3 +124,7 @@ class Config:
 
     def fuzzer_artifact_dir(self, harness: str) -> Path:
         return self.fuzzer_dir / harness / "artifacts"
+
+    def fuzzer_seed_view_dir(self, harness: str) -> Path:
+        """Per-harness directory where the fuzzer's corpus sample is surfaced to the agent."""
+        return self.from_fuzzer_dir / harness

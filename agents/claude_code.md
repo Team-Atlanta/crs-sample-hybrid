@@ -50,6 +50,7 @@ See `.claude/skills/verify-candidate/SKILL.md` for crash indicators by language 
 {workflow_section}
 {diff_section}
 {seed_section}
+{seed_sharing_section}
 {bug_candidate_section}
 ## Pre-Submit Checklist (MUST pass before saving a candidate)
 

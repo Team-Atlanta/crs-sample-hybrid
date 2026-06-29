@@ -24,8 +24,9 @@ crs_run_phase:
       CRS_AGENT: claude_code
       ANTHROPIC_MODEL: claude-opus-4-6
       # CLAUDE_CODE_CLI_VERSION: "2.1.168"   # Optional CLI pin (build arg)
-      # HYBRID_ENABLE_FUZZER: "1"            # 0 to disable the fuzzer
-      # HYBRID_ENABLE_CLAUDE: "1"            # 0 to disable the Claude agent
+      # Hybrid CRS: fuzzer, agent, and bidirectional seed sharing are always on.
+      # HYBRID_SEED_SHARE_INTERVAL: "10"     # seed-share sync cadence (s)
+      # HYBRID_SEED_SHARE_MAX_TO_AGENT: "300" # cap on fuzzer seeds surfaced to the agent
       # HYBRID_ALLOW_TIMEOUT_BUG: "0"        # 1 to treat hangs as bugs
       # HYBRID_FUZZER_RSS_MB: "2560"
       # HYBRID_VERIFY_TIMEOUT: "90"          # per-candidate verify budget (s)
