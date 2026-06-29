@@ -1,6 +1,6 @@
 ## Live Seed Sharing (Fuzzer ⇄ You)
 
-A coverage-guided fuzzer is running on this **same harness at the same time as you**, and you exchange inputs both ways. Use this — it is the whole point of the hybrid.
+A coverage-guided fuzzer is running on this **same harness at the same time as you**, and you exchange inputs both ways. This is a *secondary* aid — finding and submitting crashes is always your first priority — but used well it helps you find more.
 
 **Fuzzer → you.** The fuzzer continuously publishes a sample of its evolving corpus (inputs that reached new code) to:
 

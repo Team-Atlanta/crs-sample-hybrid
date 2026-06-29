@@ -46,9 +46,12 @@ def verify_main(argv: list[str] | None = None) -> int:
         sys.stderr.write(result.stderr.decode("utf-8", errors="replace") + "\n")
         return 2
 
-    crashed = result.exit_code != 0 and not result.timed_out
     if result.timed_out:
         crashed = cfg.allow_timeout_bug
+    else:
+        # Require a real sanitizer/Jazzer/signal marker — a bare non-zero exit
+        # (e.g. a config parser rejecting input) is not a vulnerability.
+        crashed = result.exit_code != 0 and dedup.is_real_crash(result.crash_log)
 
     signature = dedup.crash_signature(result.crash_log)
     key = dedup.dedup_key(signature)

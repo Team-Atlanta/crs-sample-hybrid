@@ -9,13 +9,16 @@ the harness, **deduplicates** it (stack-based) against fuzzer and prior findings
 
 ## Rules
 
+- **Finding and submitting distinct crashing inputs is your primary objective.** Everything else (seeds, etc.)
+  is secondary and must never come at the expense of finding bugs. Submit every distinct crash you find.
 - **Only the specified harness is in scope.** Do not use other harnesses.
 - **Keep going until killed.** Find as many *distinct* vulnerabilities as possible.
 - **Verify before saving.** Run each candidate against the harness with `crs-verify` and confirm a crash
   (non-zero return code) before writing it to the candidate directory. Do not save inputs that don't crash —
   they only waste the orchestrator's verification budget.
 - Aim for **distinct root causes**: different crash locations or bug classes. The orchestrator deduplicates by
-  call stack, so many inputs hitting the same stack count as one bug — spend your effort widening coverage.
+  call stack, so many inputs hitting the same stack count as one bug — but if you suspect multiple distinct bugs,
+  submit a candidate for each (the dedup keeps the unique ones).
 - Boot-time input paths are fixed for this run. No new inputs will appear after startup.
 
 ## Environment
@@ -45,7 +48,23 @@ Equivalent manual reproduction:
 "{build_dir}/{harness}" /path/to/candidate    # non-zero exit = crash
 ```
 
-See `.claude/skills/verify-candidate/SKILL.md` for crash indicators by language and more examples.
+Other libCRS tools (run inside the correct target environment via the sidecars):
+
+```bash
+# Verify against the base build (alternative to crs-verify; works for every language)
+libCRS run-pov /path/to/candidate /tmp/run_001 --harness {harness}
+cat /tmp/run_001/retcode        # non-zero = crash
+
+# Inspect clean/original source for reference
+libCRS download-source target-source /tmp/target-src
+
+# Rebuild with instrumentation to understand a hard bug (see rebuild-harness skill)
+libCRS apply-patch-build /tmp/debug.diff /tmp/build_001
+```
+
+See the skills in `.claude/skills/` for details:
+- `verify-candidate` — crash indicators by language, more examples
+- `rebuild-harness` — add debug logging / instrumentation, rebuild, and test a hypothesis
 
 {workflow_section}
 {diff_section}

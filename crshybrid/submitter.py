@@ -172,10 +172,21 @@ class Submitter:
                     harness, path.name, result.stderr.decode("utf-8", "replace")[:200],
                 )
                 continue
-            crashed = result.exit_code != 0 and not result.timed_out
             if result.timed_out:
                 crashed = self.cfg.allow_timeout_bug
+            else:
+                # A non-zero exit alone is not a vulnerability: a harness can
+                # legitimately exit() on bad input (e.g. a config parser). Require
+                # a real sanitizer/Jazzer/signal marker to filter false positives.
+                crashed = result.exit_code != 0 and dedup.is_real_crash(result.crash_log)
             if not crashed:
+                if result.exit_code != 0 and not result.timed_out:
+                    with self.stats.lock:
+                        self.stats.non_repro += 1
+                    logger.debug(
+                        "non-crash exit ignored (no sanitizer marker): %s harness=%s",
+                        path.name, harness,
+                    )
                 continue
 
             with self.stats.lock:

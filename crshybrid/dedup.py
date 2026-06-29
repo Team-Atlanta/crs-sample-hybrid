@@ -266,3 +266,34 @@ def dedup_key(signature: bytes) -> str:
 def is_empty_signature(signature: bytes) -> bool:
     """True if the signature carries no usable stack information."""
     return signature in (EMPTY_CRASH_CALLSTACK, DEFAULT_TIMEOUT_LOG, b"")
+
+
+# Markers that distinguish a real sanitizer/Jazzer/signal crash from a harness
+# that merely exited non-zero on bad input (e.g. a config parser rejecting input,
+# which libFuzzer reports as "fuzz target exited" — not a vulnerability).
+_REAL_CRASH_MARKERS = (
+    b"AddressSanitizer",
+    b"LeakSanitizer",
+    b"ThreadSanitizer",
+    b"MemorySanitizer",
+    b"UndefinedBehaviorSanitizer",
+    b"runtime error:",                  # UBSAN
+    b"ERROR: libFuzzer: deadly signal", # SEGV/ABRT/FPE caught by libFuzzer
+    b"ERROR: libFuzzer: timeout",
+    b"ERROR: libFuzzer: out-of-memory",
+    b"== Java Exception:",              # Jazzer
+    b"FuzzerSecurityIssue",             # Jazzer security hooks
+    b"SUMMARY: ",                       # sanitizer summary line
+)
+
+
+def is_real_crash(crash_log: bytes) -> bool:
+    """True if the harness output indicates a real sanitizer/Jazzer/signal crash.
+
+    A non-zero exit alone is not enough: harnesses such as a config parser
+    legitimately ``exit()`` on malformed input, which libFuzzer surfaces as
+    "fuzz target exited" — a false positive, not a vulnerability. Sanitizer
+    builds always emit one of these markers on a genuine memory/security fault,
+    so requiring a marker filters false positives without dropping real bugs.
+    """
+    return any(m in crash_log for m in _REAL_CRASH_MARKERS)

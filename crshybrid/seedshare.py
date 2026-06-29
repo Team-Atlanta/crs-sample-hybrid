@@ -35,6 +35,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import dedup
 from .config import Config
 from .harness import run_input
 
@@ -187,7 +188,9 @@ class SeedSharer:
             return False  # can't screen (harness unavailable); don't drop the seed
         if result.timed_out:
             return self.cfg.allow_timeout_bug
-        return result.exit_code != 0
+        # Only a real sanitizer/Jazzer/signal crash should be kept out of the
+        # corpus; a benign non-zero exit (e.g. config rejected) is a fine seed.
+        return result.exit_code != 0 and dedup.is_real_crash(result.crash_log)
 
     def _forward_crashing_seed(self, path: Path, h: str, data: bytes) -> bool:
         """Route a crashing seed to the submitter's candidate intake.
